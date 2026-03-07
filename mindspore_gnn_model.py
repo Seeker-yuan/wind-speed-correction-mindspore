@@ -57,61 +57,110 @@ class GraphConvLayer(nn.Cell):
         return output
 
 
-class GNNWindPredictor(nn.Cell):
+class SpatioTemporalGNN(nn.Cell):
     """
-    图神经网络风速预测模型
+    时空图神经网络（Spatial-Temporal GNN）
+    结合LSTM捕获时序特征 + 图卷积捕获空间关系
     """
     
-    def __init__(self, n_features=1, hidden_dim=64, n_layers=3):
-        super(GNNWindPredictor, self).__init__()
+    def __init__(self, n_features=1, hidden_dim=128, n_layers=4, seq_len=24):
+        super(SpatioTemporalGNN, self).__init__()
         
         self.n_layers = n_layers
+        self.hidden_dim = hidden_dim
+        self.seq_len = seq_len
         
-        # 输入层
-        self.input_layer = GraphConvLayer(n_features, hidden_dim)
+        # 时序特征提取器（LSTM）
+        self.lstm = nn.LSTM(
+            input_size=n_features,
+            hidden_size=hidden_dim // 2,
+            num_layers=2,
+            batch_first=True,
+            dropout=0.2
+        )
         
-        # 多层图卷积
+        # 多层图卷积（更深的网络）
         self.graph_conv_layers = nn.CellList([
-            GraphConvLayer(hidden_dim, hidden_dim) 
-            for _ in range(n_layers - 1)
+            GraphConvLayer(hidden_dim // 2 if i == 0 else hidden_dim, hidden_dim) 
+            for i in range(n_layers)
         ])
         
-        # 输出层
-        self.output_layer = nn.Dense(hidden_dim, 1, weight_init='xavier_uniform')
+        # 注意力机制
+        self.attention = nn.Dense(hidden_dim, 1)
+        
+        # 残差连接的投影层
+        self.residual_proj = nn.Dense(hidden_dim // 2, hidden_dim)
+        
+        # 输出层（更深）
+        self.fc1 = nn.Dense(hidden_dim, hidden_dim // 2)
+        self.fc2 = nn.Dense(hidden_dim // 2, 32)
+        self.output_layer = nn.Dense(32, 1, weight_init='xavier_uniform')
         
         # Dropout防止过拟合
-        self.dropout = nn.Dropout(p=0.2)
+        self.dropout = nn.Dropout(p=0.3)
         
-        # Batch Normalization
+        # Batch Normalization（每层都有）
         self.batch_norms = nn.CellList([
             nn.BatchNorm1d(hidden_dim)
             for _ in range(n_layers)
         ])
+        
+        self.relu = nn.ReLU()
+        self.sigmoid = nn.Sigmoid()
     
-    def construct(self, node_features, adjacency_matrix, target_node_idx=None):
+    def construct(self, node_temporal_features, adjacency_matrix, target_node_idx=None):
         """
         前向传播
         
         Args:
-            node_features: [n_nodes, n_features] 所有节点的特征
+            node_temporal_features: [n_nodes, seq_len, n_features] 节点的时序特征
             adjacency_matrix: [n_nodes, n_nodes] 图的邻接矩阵
-            target_node_idx: int or None 目标节点索引（预测哪个节点）
+            target_node_idx: int or None 目标节点索引
             
         Returns:
             prediction: [1] or [n_nodes, 1] 预测值
         """
-        # 第一层图卷积
-        x = self.input_layer(node_features, adjacency_matrix)
-        x = self.batch_norms[0](x)
-        x = self.dropout(x)
+        n_nodes = node_temporal_features.shape[0]
         
-        # 多层图卷积
+        # 1. 时序特征提取（对每个节点应用LSTM）
+        temporal_features = []
+        for i in range(n_nodes):
+            node_seq = node_temporal_features[i:i+1]  # [1, seq_len, n_features]
+            lstm_out, _ = self.lstm(node_seq)
+            temporal_features.append(lstm_out[:, -1, :])  # 取最后时间步
+        
+        concat_op = ops.Concat(axis=0)
+        x = concat_op(temporal_features)  # [n_nodes, hidden_dim//2]
+        
+        # 保存用于残差连接
+        residual = self.residual_proj(x)
+        
+        # 2. 多层图卷积（空间特征聚合）
         for i, conv_layer in enumerate(self.graph_conv_layers):
             x = conv_layer(x, adjacency_matrix)
-            x = self.batch_norms[i + 1](x)
+            x = self.batch_norms[i](x)
             x = self.dropout(x)
+            
+            # 残差连接（每2层添加一次）
+            if i % 2 == 1 and i > 0:
+                x = x + residual
+                residual = x
         
-        # 输出层
+        # 3. 注意力机制（突出重要节点）128, n_layers=4, seq_len=24):
+        """
+        初始化时空图神经网络模型
+        
+        Args:
+            n_features: 每个节点的特征维度（风速数据为1）
+            hidden_dim: 隐藏层维度（增加到128）
+            n_layers: 图卷积层数（增加到4层）
+            seq_len: 时序长度（历史窗口）
+        """
+        self.n_features = n_features
+        self.hidden_dim = hidden_dim
+        self.n_layers = n_layers
+        self.seq_len = seq_len
+        
         output = self.output_layer(x)
         
         # 如果指定了目标节点，只返回该节点的预测
@@ -121,23 +170,35 @@ class GNNWindPredictor(nn.Cell):
         return output
 
 
+class GNNWindPredictor(nn.Cell):
+    """向后兼容的别名"""
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.model = SpatioTemporalGNN(*args, **kwargs)
+    
+    def construct(self, *args, **kwargs):
+        return self.model(*args, **kwargs)
+
+
 class MindSporeGNNPredictor:
     """
-    MindSpore图神经网络预测器（封装类）
+    MindSpore时空图神经网络预测器（封装类）
     """
     
-    def __init__(self, n_features=1, hidden_dim=64, n_layers=3):
+    def __init__(self, n_features=1, hidden_dim=128, n_layers=4, seq_len=24):
         """
-        初始化GNN模型
+        初始化时空图神经网络模型
         
         Args:
             n_features: 每个节点的特征维度（风速数据为1）
-            hidden_dim: 隐藏层维度
-            n_layers: 图卷积层数
+            hidden_dim: 隐藏层维度（增加到128）
+            n_layers: 图卷积层数（增加到4层）
+            seq_len: 时序长度（历史窗口）
         """
         self.n_features = n_features
         self.hidden_dim = hidden_dim
         self.n_layers = n_layers
+        self.seq_len = seq_len
         
         if not MINDSPORE_AVAILABLE:
             # 后备方案：使用sklearn
@@ -161,11 +222,12 @@ class MindSporeGNNPredictor:
         self.std_X = None
         self.mean_y = None
         self.std_y = None
-    
-    def _build_mindspore_model(self):
-        """构建MindSpore GNN模型"""
-        self.net = GNNWindPredictor(
+    时空图神经网络模型"""
+        self.net = SpatioTemporalGNN(
             n_features=self.n_features,
+            hidden_dim=self.hidden_dim,
+            n_layers=self.n_layers,
+            seq_len=self.seq_lenures,
             hidden_dim=self.hidden_dim,
             n_layers=self.n_layers
         )
@@ -361,7 +423,7 @@ class MindSporeGNNPredictor:
 # 测试代码
 if __name__ == "__main__":
     print("=" * 70)
-    print("MindSpore图神经网络（GNN）风速预测模型测试")
+    print("MindSpore时空图神经网络（ST-GNN）风速预测模型测试")
     print("=" * 70)
     
     # 生成模拟数据
@@ -388,12 +450,12 @@ if __name__ == "__main__":
     print(f"测试样本数: {len(X_test)}")
     print(f"邻近风机数: {n_neighbors}")
     print(f"图节点数: {n_neighbors} (每个风机是一个节点)")
-    
-    # 创建并训练GNN模型
+    时空GNN模型
     print(f"\n{'='*70}")
-    print("开始训练图神经网络...")
+    print("开始训练时空图神经网络（ST-GNN）...")
     print(f"{'='*70}\n")
     
+    model = MindSporeGNNPredictor(n_features=1, hidden_dim=128, n_layers=4, seq_len=24
     model = MindSporeGNNPredictor(n_features=1, hidden_dim=64, n_layers=3)
     
     if model.framework == 'mindspore':
@@ -430,9 +492,11 @@ if __name__ == "__main__":
     
     print(f"\n{'='*70}")
     print("✓ 测试完成！")
-    print(f"{'='*70}")
-    print("\n图神经网络优势:")
-    print("  1. 建模风机之间的空间拓扑关系")
-    print("  2. 利用图卷积聚合邻居节点信息")
+    print(f"{时空图神经网络（ST-GNN）优势:")
+    print("  1. LSTM捕获时序依赖关系")
+    print("  2. 图卷积建模空间拓扑结构")
+    print("  3. 注意力机制突出重要节点")
+    print("  4. 残差连接提升深层网络训练")
+    print("  5. 4层GNN + 2层LSTM，模型更深更强")
     print("  3. 更好地捕获风场的空间相关性")
     print("=" * 70)
