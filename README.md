@@ -72,10 +72,6 @@ python 汇总预测_mindspore版.py
 .
 ├── mindspore_model_v2.py          # MindSpore神经网络模型
 ├── 汇总预测_mindspore版.py         # 主程序（数据处理+补全）
-├── 运行项目.bat                   # Windows快速启动脚本
-├── 测试MindSpore.bat              # 模型测试脚本
-├── 使用指南.md                    # 详细使用文档
-├── 项目汇报提纲.md                # 项目汇报材料
 ├── wind_data/                     # 原始数据目录
 └── cleaned_data/                  # 输出数据目录
 ```
@@ -119,15 +115,3 @@ python 汇总预测_mindspore版.py
 - ✅ 训练稳定（Loss收敛良好）
 - ✅ 可扩展性强（易于升级到LSTM、GNN）
 - ✅ 国产化支持（MindSpore生态）
-
-## 📝 开发者
-
-大三学生项目 | 指导老师: [导师姓名]
-
-## 📄 许可证
-
-MIT License
-
-## 🙏 致谢
-
-感谢华为MindSpore团队提供的优秀深度学习框架
