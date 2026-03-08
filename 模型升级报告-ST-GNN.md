@@ -180,7 +180,7 @@ def _build_adjacency_matrix(self, n_nodes, positions, sigma=1.0):
 ```bash
 双击：运行真实数据训练.bat
 ```
-这将使用你提供的wind_data中104台风机的数据进行训练。
+这将使用你提供的wind_data中108台风机的数据进行训练。
 
 ## 技术创新点
 
