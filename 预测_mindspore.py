@@ -12,6 +12,9 @@ import time
 from sklearn.preprocessing import StandardScaler
 from fastdtw import fastdtw
 
+# 当前脚本所在目录，所有路径基于此构建
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # 导入MindSpore时空图神经网络模型
 try:
     from mindspore_gnn_model import MindSporeWindPredictor
@@ -303,9 +306,9 @@ def fill_machine_neural(fname, k=24, n=4, start_time=None, fill_hour=None,
 
     if len(miss) == 0:
         print(f"[OK] {fname} 在 [{begin_ts} ~ {end_ts}] 无需补全")
-        temp_path = r"D:\project\风能ui设计\cleaned_data"
-        out_path = os.path.join(temp_path, fname)
-        df.to_excel(out_path)
+        out_dir = os.path.join(BASE_DIR, "cleaned_data")
+        os.makedirs(out_dir, exist_ok=True)
+        df.to_excel(os.path.join(out_dir, fname))
         return df
 
     # 连续分块
@@ -340,8 +343,9 @@ def fill_machine_neural(fname, k=24, n=4, start_time=None, fill_hour=None,
             print(f"  [OK] 已补全 {len(preds)} 个数据点")
 
     # 导出
-    temp_path = r"C:\Users\31876\Desktop\风能ui设计\cleaned_data"
-    out_path = os.path.join(temp_path, fname)
+    out_dir = os.path.join(BASE_DIR, "cleaned_data")
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, fname)
     df.to_excel(out_path)
     print(f"\n[OK] {fname} 已保存到 {out_path}")
     return df
@@ -419,7 +423,7 @@ def generate_damage_report(original_dir):
     damage_rates.sort(key=lambda x: x['damage_rate'], reverse=True)
     report_df = pd.DataFrame(damage_rates)
 
-    output_path = r"C:\Users\31876\Desktop\风能ui设计\缺损率报告_neural.xlsx"
+    output_path = os.path.join(BASE_DIR, "缺损率报告_neural.xlsx")
     report_df.to_excel(output_path, index=False)
 
     print(f"[OK] 缺损率报告已生成: {output_path}")
@@ -427,8 +431,8 @@ def generate_damage_report(original_dir):
 
 
 if __name__ == "__main__":
-    # 数据目录
-    DIR = r"C:\Users\31876\Desktop\风能ui设计\wind_data"
+    # 数据目录（相对路径，无需修改）
+    DIR = os.path.join(BASE_DIR, "wind_data")
     
     # 配置参数
     WINDOW_SIZE = 24      # 历史窗口（小时）
