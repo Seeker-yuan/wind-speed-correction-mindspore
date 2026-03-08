@@ -12,15 +12,23 @@ import time
 from sklearn.preprocessing import StandardScaler
 from fastdtw import fastdtw
 
-# 尝试导入MindSpore模型
+# 导入MindSpore时空图神经网络模型
 try:
-    from mindspore_model_v2 import MindSporeWindPredictor
+    from mindspore_gnn_model import MindSporeWindPredictor
     MINDSPORE_AVAILABLE = True
-    print("✓ 使用MindSpore模型")
+    print("[OK] MindSpore ST-GNN 4-layer GCN + Attention")
 except ImportError:
-    from wind_neural_model import WindSpeedNeuralNetwork as MindSporeWindPredictor
+    from sklearn.neural_network import MLPRegressor
+    class MindSporeWindPredictor:
+        def __init__(self, n_neighbors=4, hidden_size=64):
+            self.model = MLPRegressor(hidden_layer_sizes=(hidden_size, hidden_size, 32),
+                                      max_iter=200, random_state=42)
+        def fit(self, X, y, epochs=30, batch_size=32, verbose=False, **kw):
+            self.model.fit(X, y)
+        def predict(self, X, **kw):
+            return self.model.predict(X)
     MINDSPORE_AVAILABLE = False
-    print("⚠ MindSpore不可用，使用通用神经网络模型")
+    print("[WARN] MindSpore not available, using sklearn fallback")
 
 # 全局变量
 machines = {}  # {fname: DataFrame(index=timestamp, cols=['OBS'])}

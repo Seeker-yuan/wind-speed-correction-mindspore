@@ -226,7 +226,7 @@ def train_and_evaluate():
     model_path = r'C:\Users\31876\Desktop\风能ui设计\trained_stgnn_model.ckpt'
     # 这里可以添加模型保存逻辑
     
-    print(f"\n[OK] 训练完成！")
+    print(f"\n✓ 训练完成！")
     print(f"  模型架构: 2层LSTM + 4层图卷积 + 注意力机制 + 残差连接")
     print(f"  训练样本: {train_size}")
     print(f"  测试样本: {test_size}")

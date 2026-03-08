@@ -282,7 +282,7 @@ def fill_machine_neural(fname, k=24, n=4, start_time=None, fill_hour=None,
     miss = miss_all[(miss_all >= begin_ts) & (miss_all <= end_ts)]
 
     if len(miss) == 0:
-        print(f"[OK] {fname} 在 [{begin_ts} ~ {end_ts}] 无需补全")
+        print(f"✓ {fname} 在 [{begin_ts} ~ {end_ts}] 无需补全")
         temp_path = r"D:\project\风能ui设计\cleaned_data"
         out_path = os.path.join(temp_path, fname)
         df.to_excel(out_path)
@@ -317,13 +317,13 @@ def fill_machine_neural(fname, k=24, n=4, start_time=None, fill_hour=None,
                 df.at[t, 'filled'] = 1
         
         if preds:
-            print(f"  [OK] 已补全 {len(preds)} 个数据点")
+            print(f"  ✓ 已补全 {len(preds)} 个数据点")
 
     # 导出
     temp_path = r"C:\Users\31876\Desktop\风能ui设计\cleaned_data"
     out_path = os.path.join(temp_path, fname)
     df.to_excel(out_path)
-    print(f"\n[OK] {fname} 已保存到 {out_path}")
+    print(f"\n✓ {fname} 已保存到 {out_path}")
     return df
 
 
@@ -361,7 +361,7 @@ def fill_directory_neural(original_dir, k=24, n=4, start_time=None, fill_hour=No
         )
     
     print(f"\n{'='*70}")
-    print("[OK] 全部风机处理完成！")
+    print("✓ 全部风机处理完成！")
     print(f"{'='*70}")
 
 
@@ -402,7 +402,7 @@ def generate_damage_report(original_dir):
     output_path = r"C:\Users\31876\Desktop\风能ui设计\缺损率报告_neural.xlsx"
     report_df.to_excel(output_path, index=False)
 
-    print(f"[OK] 缺损率报告已生成: {output_path}")
+    print(f"✓ 缺损率报告已生成: {output_path}")
     return report_df
 
 
@@ -440,5 +440,5 @@ if __name__ == "__main__":
     damage_report = generate_damage_report(DIR)
     
     print("\n" + "="*70)
-    print("[OK] 所有任务完成！")
+    print("✓ 所有任务完成！")
     print("="*70)
