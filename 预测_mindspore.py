@@ -103,7 +103,7 @@ def get_candidates_for_block_cached(target_id, block_start, block_end, k, n):
     tgt_lon, tgt_lat = pos[target_id][0], pos[target_id][1]
 
     # 目标窗口校验
-    req_tgt = pd.date_range(win_start, win_end, freq='H')
+    req_tgt = pd.date_range(win_start, win_end, freq='h')
     if not req_tgt.isin(tgt.index).all(): 
         return [], [], []
     q = tgt.loc[win_start:win_end, 'OBS']
@@ -119,7 +119,7 @@ def get_candidates_for_block_cached(target_id, block_start, block_end, k, n):
             continue
         
         # 候选全段覆盖且无 NaN
-        req_full = pd.date_range(win_start, block_end, freq='H')
+        req_full = pd.date_range(win_start, block_end, freq='h')
         if not req_full.isin(df.index).all(): 
             continue
         s_full = df.loc[req_full, 'OBS']
@@ -172,7 +172,8 @@ def predict_block_gap_neural(target_id, block_start, block_end, k=24, n=4,
 
     win_start = block_start - pd.Timedelta(hours=k)
     win_end = block_start - pd.Timedelta(hours=1)
-    times = pd.date_range(win_start, win_end, freq='H')
+    times = pd.date_range(win_start, win_end, freq='h')
+    SEQ_LEN = min(6, k // 4)  # 时序窗口长度，最多取历史的1/4
 
     # 准备三路预测
     predictions_list = []
@@ -189,26 +190,45 @@ def predict_block_gap_neural(target_id, block_start, block_end, k=24, n=4,
     for method_name, meta in methods:
         cand_names = [name for _, name in meta]
         cand_dfs = [load_one(name) for name in cand_names]
-        
-        # 训练集（窗口内）
-        X = np.vstack([df.loc[times, 'OBS'].to_numpy() for df in cand_dfs]).T  # (k, n)
-        y = tgt.loc[times, 'OBS'].to_numpy()
-        
-        mask = (~np.isnan(X).any(axis=1)) & (~np.isnan(y))
-        X, y = X[mask], y[mask]
-        
-        if len(X) < 10:  # 数据太少
+        # 候选风机地理坐标，用于构建高斯核邻接矩阵
+        cand_positions = np.array([pos[name] for name in cand_names], dtype=np.float32)
+
+        # 构建时序训练样本: X shape (n_samples, n_neighbors, SEQ_LEN)
+        # 对历史窗口内每个时刻 t，取其前 SEQ_LEN 小时的邻居风速作为特征
+        X_list, y_list = [], []
+        for t_idx in range(SEQ_LEN, len(times)):
+            t_slice = times[t_idx - SEQ_LEN: t_idx]
+            feat = np.array([df.loc[t_slice, 'OBS'].to_numpy()
+                             for df in cand_dfs])  # (n_neighbors, SEQ_LEN)
+            target_val = tgt.loc[times[t_idx], 'OBS']
+            if not (np.isnan(feat).any() or np.isnan(target_val)):
+                X_list.append(feat)
+                y_list.append(float(target_val))
+
+        if len(X_list) < 5:
             continue
-        
-        # 创建并训练神经网络
-        model = MindSporeWindPredictor(n_neighbors=len(cand_names), hidden_size=64)
-        model.fit(X, y, epochs=epochs, batch_size=min(32, len(X)), verbose=False)
-        
-        # 预测块内数据
-        pred_times = pd.date_range(block_start, block_end, freq='H')
-        Xp = np.vstack([df.loc[pred_times, 'OBS'].to_numpy() for df in cand_dfs]).T
-        preds = model.predict(Xp)
-        
+
+        X = np.array(X_list, dtype=np.float32)  # (n_samples, n_neighbors, SEQ_LEN)
+        y = np.array(y_list, dtype=np.float32)
+
+        # 创建并训练神经网络（时序特征 + 地理位置加权邻接矩阵）
+        model = MindSporeWindPredictor(n_neighbors=len(cand_names),
+                                       hidden_size=64, seq_len=SEQ_LEN)
+        model.fit(X, y, epochs=epochs, batch_size=min(32, len(X)),
+                  verbose=False, positions=cand_positions)
+
+        # 构建预测特征：每个预测时刻取其前 SEQ_LEN 小时邻居数据
+        pred_times = pd.date_range(block_start, block_end, freq='h')
+        Xp_list = []
+        for pt in pred_times:
+            ctx = pd.date_range(pt - pd.Timedelta(hours=SEQ_LEN),
+                                pt - pd.Timedelta(hours=1), freq='h')
+            feat = np.array([df.loc[ctx, 'OBS'].to_numpy()
+                             for df in cand_dfs])  # (n_neighbors, SEQ_LEN)
+            Xp_list.append(feat)
+        Xp = np.array(Xp_list, dtype=np.float32)  # (n_pred, n_neighbors, SEQ_LEN)
+
+        preds = model.predict(Xp, positions=cand_positions)
         predictions_list.append(dict(zip(pred_times, preds)))
     
     # 融合多路预测

@@ -144,17 +144,18 @@ class MindSporeWindPredictor:
         model.fit(X, y, epochs=30, batch_size=32, verbose=False)
         preds = model.predict(X_test)
 
-    其中 X shape = (n_samples, n_neighbors), 每行是 n 台候选风机的风速观测值
+    其中 X shape = (n_samples, n_neighbors, seq_len), 每个样本是 n 台候选风机过去 seq_len 小时的风速
     """
 
-    def __init__(self, n_neighbors=4, hidden_size=64):
+    def __init__(self, n_neighbors=4, hidden_size=64, seq_len=6):
         self.n_neighbors = n_neighbors
         self.hidden_size = hidden_size
+        self.seq_len = seq_len
         self.mean_X = self.std_X = self.mean_y = self.std_y = None
 
         if MINDSPORE_AVAILABLE:
             self.net = SpatioTemporalGNN(
-                input_dim=1,
+                input_dim=seq_len,   # 每个节点的特征维度 = 时序窗口长度
                 hidden_dim=hidden_size,
                 n_layers=4
             )
@@ -206,7 +207,7 @@ class MindSporeWindPredictor:
         训练模型
 
         Args:
-            X: (n_samples, n_neighbors) 候选风机风速
+            X: (n_samples, n_neighbors, seq_len) 候选风机时序特征
             y: (n_samples,) 目标风机风速
             epochs: 训练轮数
             batch_size: 批大小 (未使用, 保持接口一致)
@@ -241,8 +242,8 @@ class MindSporeWindPredictor:
             epoch_loss = 0.0
 
             for idx in indices:
-                # 每个样本: n_neighbors个节点, 每个1个特征
-                feat = Tensor(X_norm[idx].reshape(-1, 1), mstype.float32)
+                # 每个样本: shape (n_neighbors, seq_len) — 节点数 × 时序特征维度
+                feat = Tensor(X_norm[idx], mstype.float32)
                 label = Tensor(
                     np.array([[y_norm[idx]]], dtype=np.float32), mstype.float32
                 )
@@ -263,14 +264,14 @@ class MindSporeWindPredictor:
         预测
 
         Args:
-            X: (n_pred, n_neighbors) 候选风机风速
+            X: (n_pred, n_neighbors, seq_len) 候选风机时序特征
         Returns:
             numpy array of predictions
         """
         X_norm = self._normalize(X, fit=False)
 
         if self.framework == 'sklearn':
-            pred_norm = self.model.predict(X_norm).reshape(-1)
+            pred_norm = self.model.predict(X_norm.reshape(X_norm.shape[0], -1)).reshape(-1)
             return self._denormalize_y(pred_norm)
 
         self.net.set_train(False)
@@ -280,7 +281,7 @@ class MindSporeWindPredictor:
 
         preds = []
         for i in range(X_norm.shape[0]):
-            feat = Tensor(X_norm[i].reshape(-1, 1), mstype.float32)
+            feat = Tensor(X_norm[i], mstype.float32)  # (n_neighbors, seq_len)
             pred = self.net(feat, adj_t, target_idx=0)
             preds.append(pred.asnumpy().item())
 
@@ -301,23 +302,23 @@ if __name__ == "__main__":
     print("=" * 60)
 
     np.random.seed(42)
-    N_TRAIN, N_TEST, N_NEIGHBORS = 40, 15, 4
+    N_TRAIN, N_TEST, N_NEIGHBORS, SEQ_LEN = 40, 15, 4, 6
 
-    # 模拟数据: n台候选风机的风速 -> 预测目标风机
-    X_train = np.random.randn(N_TRAIN, N_NEIGHBORS).astype(np.float32) * 3 + 8
-    y_train = (0.3 * X_train[:, 0] + 0.25 * X_train[:, 1] +
-               0.25 * X_train[:, 2] + 0.2 * X_train[:, 3] +
+    # 模拟数据: (n_samples, n_neighbors, seq_len) — 每台候选风机过去6小时风速
+    X_train = np.random.randn(N_TRAIN, N_NEIGHBORS, SEQ_LEN).astype(np.float32) * 3 + 8
+    y_train = (0.3 * X_train[:, 0, -1] + 0.25 * X_train[:, 1, -1] +
+               0.25 * X_train[:, 2, -1] + 0.2 * X_train[:, 3, -1] +
                np.random.randn(N_TRAIN).astype(np.float32) * 0.3)
 
-    X_test = np.random.randn(N_TEST, N_NEIGHBORS).astype(np.float32) * 3 + 8
-    y_test = (0.3 * X_test[:, 0] + 0.25 * X_test[:, 1] +
-              0.25 * X_test[:, 2] + 0.2 * X_test[:, 3])
+    X_test = np.random.randn(N_TEST, N_NEIGHBORS, SEQ_LEN).astype(np.float32) * 3 + 8
+    y_test = (0.3 * X_test[:, 0, -1] + 0.25 * X_test[:, 1, -1] +
+              0.25 * X_test[:, 2, -1] + 0.2 * X_test[:, 3, -1])
 
-    print(f"\nTrain: {N_TRAIN}, Test: {N_TEST}, Neighbors: {N_NEIGHBORS}")
+    print(f"\nTrain: {N_TRAIN}, Test: {N_TEST}, Neighbors: {N_NEIGHBORS}, seq_len: {SEQ_LEN}")
     print(f"X shape: {X_train.shape}, y shape: {y_train.shape}")
     print()
 
-    model = MindSporeWindPredictor(n_neighbors=N_NEIGHBORS, hidden_size=64)
+    model = MindSporeWindPredictor(n_neighbors=N_NEIGHBORS, hidden_size=64, seq_len=SEQ_LEN)
     model.fit(X_train, y_train, epochs=20, verbose=True)
 
     y_pred = model.predict(X_test)
