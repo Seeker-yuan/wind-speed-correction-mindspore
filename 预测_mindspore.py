@@ -292,7 +292,7 @@ def fill_machine_neural(fname, k=24, n=4, start_time=None, fill_hour=None,
 
     # 计算补全窗口
     if start_time is not None:
-        begin_ts = pd.to_datetime(start_time).floor('H')
+        begin_ts = pd.to_datetime(start_time).floor('h')
     else:
         begin_ts = df.index.min()
 
@@ -450,6 +450,8 @@ if __name__ == "__main__":
     ╚════════════════════════════════════════════════════════════════╝
     """)
     
+    t_start = time.time()
+
     # 批量补全
     fill_directory_neural(
         DIR, 
@@ -463,6 +465,8 @@ if __name__ == "__main__":
     print("\n生成缺损率报告...")
     damage_report = generate_damage_report(DIR)
     
+    elapsed = time.time() - t_start
+    print(f"\n总耗时: {elapsed/60:.1f} 分钟")
     print("\n" + "="*70)
     print("[OK] 所有任务完成！")
     print("="*70)

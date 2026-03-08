@@ -217,7 +217,8 @@ class MindSporeWindPredictor:
         X_norm, y_norm = self._normalize(X, y, fit=True)
 
         if self.framework == 'sklearn':
-            self.model.fit(X_norm, y_norm.ravel())
+            # sklearn 不支持 3D 输入，需展平为 (n_samples, n_neighbors*seq_len)
+            self.model.fit(X_norm.reshape(X_norm.shape[0], -1), y_norm.ravel())
             if verbose:
                 print("  [OK] sklearn training done")
             return
@@ -237,6 +238,10 @@ class MindSporeWindPredictor:
             forward_fn, None, self.optimizer.parameters, has_aux=True
         )
 
+        best_loss = float('inf')
+        patience_cnt = 0
+        PATIENCE = 3  # 连续3轮无改善则提前停止
+
         for epoch in range(epochs):
             indices = np.random.permutation(n_samples)
             epoch_loss = 0.0
@@ -252,9 +257,20 @@ class MindSporeWindPredictor:
                 self.optimizer(grads)
                 epoch_loss += loss.asnumpy()
 
+            avg = epoch_loss / n_samples
             if verbose and (epoch + 1) % 5 == 0:
-                avg = epoch_loss / n_samples
                 print(f"    Epoch {epoch+1}/{epochs}, Loss: {avg:.6f}")
+
+            # 早停：连续 PATIENCE 轮损失无改善则中止
+            if avg < best_loss - 1e-6:
+                best_loss = avg
+                patience_cnt = 0
+            else:
+                patience_cnt += 1
+                if patience_cnt >= PATIENCE:
+                    if verbose:
+                        print(f"    Early stop at epoch {epoch+1} (loss={avg:.6f})")
+                    break
 
         if verbose:
             print("  [OK] ST-GNN training done")
@@ -272,7 +288,7 @@ class MindSporeWindPredictor:
 
         if self.framework == 'sklearn':
             pred_norm = self.model.predict(X_norm.reshape(X_norm.shape[0], -1)).reshape(-1)
-            return self._denormalize_y(pred_norm)
+            return np.clip(self._denormalize_y(pred_norm), 0.0, None)
 
         self.net.set_train(False)
         n_nodes = X_norm.shape[1]
@@ -285,7 +301,8 @@ class MindSporeWindPredictor:
             pred = self.net(feat, adj_t, target_idx=0)
             preds.append(pred.asnumpy().item())
 
-        return self._denormalize_y(np.array(preds, dtype=np.float32))
+        # 风速物理约束：不能为负
+        return np.clip(self._denormalize_y(np.array(preds, dtype=np.float32)), 0.0, None)
 
 
 # 向后兼容别名
