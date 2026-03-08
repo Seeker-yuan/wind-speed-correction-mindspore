@@ -41,7 +41,7 @@ def preload_machines(original_dir, keep_cols=('OBS',)):
     pos.clear()
 
     for fname in os.listdir(original_dir):
-        if not fname.endswith('.xlsx'):
+        if not fname.endswith('.xlsx') or fname.startswith('~$'):
             continue
         path = os.path.join(original_dir, fname)
         df = pd.read_excel(path)
@@ -414,7 +414,7 @@ if __name__ == "__main__":
     WINDOW_SIZE = 24      # 历史窗口（小时）
     N_NEIGHBORS = 4       # 候选风机数量
     USE_ENSEMBLE = True   # 使用集成模型
-    EPOCHS = 30           # 训练轮数
+    EPOCHS = 10           # 训练轮数
     
     print("""
     ╔════════════════════════════════════════════════════════════════╗
