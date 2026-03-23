@@ -270,6 +270,48 @@ def synchronous_fill_panel(panel, model, adjacency, seq_len=6):
     return filled_panel
 
 
+def apply_bidirectional_blending(panel_raw, panel_filled):
+    """离线双向边界残差补偿，降低缺失段右边界断崖跳变。"""
+    smoothed = panel_filled.copy()
+
+    for col in panel_raw.columns:
+        raw_s = panel_raw[col]
+        fill_s = panel_filled[col].copy()
+
+        is_missing = raw_s.isna().to_numpy()
+        idx = np.where(is_missing)[0]
+        blocks = []
+        if len(idx) > 0:
+            s = int(idx[0])
+            e = int(idx[0])
+            for x in idx[1:]:
+                x = int(x)
+                if x == e + 1:
+                    e = x
+                else:
+                    blocks.append((s, e))
+                    s = x
+                    e = x
+            blocks.append((s, e))
+
+        for s_idx, e_idx in blocks:
+            # 右侧有真实观测时，施加边界连续性补偿
+            if e_idx + 1 < len(raw_s) and pd.notna(raw_s.iloc[e_idx + 1]):
+                right_true = float(raw_s.iloc[e_idx + 1])
+                right_pred = float(fill_s.iloc[e_idx])
+                jump = right_true - right_pred
+
+                length = e_idx - s_idx + 1
+                for k in range(length):
+                    weight = (k + 1) / (length + 1)
+                    smoothed.iat[s_idx + k, smoothed.columns.get_loc(col)] = (
+                        float(smoothed.iat[s_idx + k, smoothed.columns.get_loc(col)])
+                        + jump * weight
+                    )
+
+    return smoothed.clip(lower=0.0)
+
+
 def save_global_filled_results(machine_names, panel_raw, panel_filled, out_dir):
     """按风机拆分导出补全结果"""
     os.makedirs(out_dir, exist_ok=True)
@@ -314,7 +356,8 @@ def run_global_synchronous_pipeline(original_dir, seq_len=6, epochs=10,
               batch_size=min(64, len(x_train)),
               verbose=True, adjacency=adjacency, mask=m_train)
 
-    panel_filled = synchronous_fill_panel(panel_raw, model, adjacency, seq_len=seq_len)
+    panel_pred = synchronous_fill_panel(panel_raw, model, adjacency, seq_len=seq_len)
+    panel_filled = apply_bidirectional_blending(panel_raw, panel_pred)
     out_dir = os.path.join(BASE_DIR, 'cleaned_data')
     save_global_filled_results(machine_names, panel_raw, panel_filled, out_dir)
     print(f"[OK] 全场同步补全完成，结果输出到: {out_dir}")
