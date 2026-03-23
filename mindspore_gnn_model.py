@@ -184,13 +184,15 @@ class MindSporeWindPredictor:
             y = np.array(y, dtype=np.float32)
             if y.ndim == 1:
                 if fit:
-                    self.mean_y = y.mean()
-                    self.std_y = y.std() + 1e-8
-                return X_norm, (y - self.mean_y) / self.std_y
+                    self.mean_y = np.nanmean(y)
+                    self.std_y = np.nanstd(y) + 1e-8
+                y_norm = (y - self.mean_y) / self.std_y
+                return X_norm, np.nan_to_num(y_norm, nan=0.0)
             if fit:
-                self.mean_y = y.mean(axis=0, keepdims=True)
-                self.std_y = y.std(axis=0, keepdims=True) + 1e-8
-            return X_norm, (y - self.mean_y) / self.std_y
+                self.mean_y = np.nanmean(y, axis=0, keepdims=True)
+                self.std_y = np.nanstd(y, axis=0, keepdims=True) + 1e-8
+            y_norm = (y - self.mean_y) / self.std_y
+            return X_norm, np.nan_to_num(y_norm, nan=0.0)
         return X_norm
 
     def _denormalize_y(self, y_norm):
