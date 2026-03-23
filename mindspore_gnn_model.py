@@ -45,7 +45,13 @@ if MINDSPORE_AVAILABLE:
 
         def construct(self, node_features, adjacency_matrix):
             # 消息传递: 邻居特征聚合
-            aggregated = ops.matmul(adjacency_matrix, node_features)
+            if len(node_features.shape) == 2:
+                aggregated = ops.matmul(adjacency_matrix, node_features)
+            else:
+                batch_size = node_features.shape[0]
+                adj_batch = ops.tile(ops.expand_dims(adjacency_matrix, 0),
+                                     (batch_size, 1, 1))
+                aggregated = ops.matmul(adj_batch, node_features)
             # 特征变换
             output = self.linear(aggregated)
             return self.activation(output)
@@ -96,14 +102,13 @@ if MINDSPORE_AVAILABLE:
             self.sigmoid = nn.Sigmoid()
             self.dropout = nn.Dropout(p=0.2)
 
-        def construct(self, node_features, adjacency_matrix, target_idx=None):
+        def construct(self, node_features, adjacency_matrix):
             """
             Args:
-                node_features: [n_nodes, input_dim]
+                node_features: [n_nodes, input_dim] or [batch, n_nodes, input_dim]
                 adjacency_matrix: [n_nodes, n_nodes]
-                target_idx: int or None
             Returns:
-                [1, 1] or [n_nodes, 1]
+                [n_nodes, 1] or [batch, n_nodes, 1]
             """
             # 输入投影
             x = self.input_proj(node_features)      # [n_nodes, hidden_dim]
@@ -126,9 +131,6 @@ if MINDSPORE_AVAILABLE:
             x = self.dropout(x)
             x = self.relu(self.fc2(x))
             out = self.output_layer(x)  # [n_nodes, 1]
-
-            if target_idx is not None:
-                return out[target_idx:target_idx + 1]
             return out
 
 
@@ -152,6 +154,7 @@ class MindSporeWindPredictor:
         self.hidden_size = hidden_size
         self.seq_len = seq_len
         self.mean_X = self.std_X = self.mean_y = self.std_y = None
+        self.multi_output = False
 
         if MINDSPORE_AVAILABLE:
             self.net = SpatioTemporalGNN(
@@ -178,10 +181,15 @@ class MindSporeWindPredictor:
             self.std_X = X.std(axis=0, keepdims=True) + 1e-8
         X_norm = (X - self.mean_X) / self.std_X
         if y is not None:
-            y = np.array(y, dtype=np.float32).reshape(-1)
+            y = np.array(y, dtype=np.float32)
+            if y.ndim == 1:
+                if fit:
+                    self.mean_y = y.mean()
+                    self.std_y = y.std() + 1e-8
+                return X_norm, (y - self.mean_y) / self.std_y
             if fit:
-                self.mean_y = y.mean()
-                self.std_y = y.std() + 1e-8
+                self.mean_y = y.mean(axis=0, keepdims=True)
+                self.std_y = y.std(axis=0, keepdims=True) + 1e-8
             return X_norm, (y - self.mean_y) / self.std_y
         return X_norm
 
@@ -202,41 +210,63 @@ class MindSporeWindPredictor:
         adj = adj / deg
         return adj.astype(np.float32)
 
-    def fit(self, X, y, epochs=30, batch_size=32, verbose=True, positions=None):
+    def fit(self, X, y, epochs=30, batch_size=32, verbose=True,
+            positions=None, adjacency=None, mask=None):
         """
         训练模型
 
         Args:
             X: (n_samples, n_neighbors, seq_len) 候选风机时序特征
-            y: (n_samples,) 目标风机风速
+            y: (n_samples,) 或 (n_samples, n_nodes)
             epochs: 训练轮数
             batch_size: 批大小 (未使用, 保持接口一致)
             verbose: 是否输出训练日志
             positions: 可选, 风机坐标用于构建邻接矩阵
+            adjacency: 可选, 直接传入全局邻接矩阵
+            mask: 可选, 多输出时的监督掩码
         """
         X_norm, y_norm = self._normalize(X, y, fit=True)
+        self.multi_output = (y_norm.ndim == 2)
 
         if self.framework == 'sklearn':
             # sklearn 不支持 3D 输入，需展平为 (n_samples, n_neighbors*seq_len)
-            self.model.fit(X_norm.reshape(X_norm.shape[0], -1), y_norm.ravel())
+            self.model.fit(X_norm.reshape(X_norm.shape[0], -1), y_norm)
             if verbose:
                 print("  [OK] sklearn training done")
             return
 
         n_samples = X_norm.shape[0]
         n_nodes = X_norm.shape[1]  # n_neighbors
-        adj = self._build_adj(n_nodes, positions)
+        if adjacency is not None:
+            adj = np.array(adjacency, dtype=np.float32)
+        else:
+            adj = self._build_adj(n_nodes, positions)
         adj_t = Tensor(adj, mstype.float32)
+        local_mode = (y_norm.ndim == 1)
+        if (not local_mode) and (mask is None):
+            mask = np.isfinite(y_norm).astype(np.float32)
 
         self.net.set_train(True)
 
-        def forward_fn(feat, a, label):
-            pred = self.net(feat, a, target_idx=0)
-            return self.loss_fn(pred, label), pred
+        if local_mode:
+            def forward_fn(feat, a, label):
+                pred_all = self.net(feat, a).reshape(-1)
+                pred = pred_all[0:1]
+                return self.loss_fn(pred, label), pred
 
-        grad_fn = mindspore.value_and_grad(
-            forward_fn, None, self.optimizer.parameters, has_aux=True
-        )
+            grad_fn = mindspore.value_and_grad(
+                forward_fn, None, self.optimizer.parameters, has_aux=True
+            )
+        else:
+            def forward_fn(feat, a, label, m):
+                pred = self.net(feat, a).reshape(-1)
+                sq = ops.square(pred - label)
+                loss = ops.sum(sq * m) / (ops.sum(m) + 1e-8)
+                return loss, pred
+
+            grad_fn = mindspore.value_and_grad(
+                forward_fn, None, self.optimizer.parameters, has_aux=True
+            )
 
         best_loss = float('inf')
         patience_cnt = 0
@@ -249,11 +279,16 @@ class MindSporeWindPredictor:
             for idx in indices:
                 # 每个样本: shape (n_neighbors, seq_len) — 节点数 × 时序特征维度
                 feat = Tensor(X_norm[idx], mstype.float32)
-                label = Tensor(
-                    np.array([[y_norm[idx]]], dtype=np.float32), mstype.float32
-                )
-
-                (loss, _), grads = grad_fn(feat, adj_t, label)
+                if local_mode:
+                    label = Tensor(np.array([y_norm[idx]], dtype=np.float32),
+                                   mstype.float32)
+                    (loss, _), grads = grad_fn(feat, adj_t, label)
+                else:
+                    label_np = np.nan_to_num(y_norm[idx], nan=0.0).astype(np.float32)
+                    mask_np = mask[idx].astype(np.float32)
+                    label = Tensor(label_np, mstype.float32)
+                    m = Tensor(mask_np, mstype.float32)
+                    (loss, _), grads = grad_fn(feat, adj_t, label, m)
                 self.optimizer(grads)
                 epoch_loss += loss.asnumpy()
 
@@ -275,7 +310,7 @@ class MindSporeWindPredictor:
         if verbose:
             print("  [OK] ST-GNN training done")
 
-    def predict(self, X, positions=None):
+    def predict(self, X, positions=None, adjacency=None):
         """
         预测
 
@@ -287,22 +322,34 @@ class MindSporeWindPredictor:
         X_norm = self._normalize(X, fit=False)
 
         if self.framework == 'sklearn':
-            pred_norm = self.model.predict(X_norm.reshape(X_norm.shape[0], -1)).reshape(-1)
-            return np.clip(self._denormalize_y(pred_norm), 0.0, None)
+            pred_norm = self.model.predict(X_norm.reshape(X_norm.shape[0], -1))
+            pred = self._denormalize_y(pred_norm)
+            pred = np.clip(pred, 0.0, None)
+            if self.multi_output:
+                return pred
+            return pred.reshape(-1)
 
         self.net.set_train(False)
         n_nodes = X_norm.shape[1]
-        adj = self._build_adj(n_nodes, positions)
+        if adjacency is not None:
+            adj = np.array(adjacency, dtype=np.float32)
+        else:
+            adj = self._build_adj(n_nodes, positions)
         adj_t = Tensor(adj, mstype.float32)
 
         preds = []
         for i in range(X_norm.shape[0]):
             feat = Tensor(X_norm[i], mstype.float32)  # (n_neighbors, seq_len)
-            pred = self.net(feat, adj_t, target_idx=0)
-            preds.append(pred.asnumpy().item())
+            pred = self.net(feat, adj_t).asnumpy().reshape(-1)
+            preds.append(pred)
 
+        preds = np.array(preds, dtype=np.float32)
+        denorm = self._denormalize_y(preds)
+        denorm = np.clip(denorm, 0.0, None)
+        if self.multi_output:
+            return denorm
         # 风速物理约束：不能为负
-        return np.clip(self._denormalize_y(np.array(preds, dtype=np.float32)), 0.0, None)
+        return denorm[:, 0]
 
 
 # 向后兼容别名
