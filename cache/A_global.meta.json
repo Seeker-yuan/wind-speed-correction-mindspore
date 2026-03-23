@@ -1,0 +1,21 @@
+{
+  "machine_names": [
+    "id_53478.xlsx",
+    "id_53486.xlsx",
+    "id_53487.xlsx",
+    "id_53488.xlsx",
+    "id_53490.xlsx",
+    "id_53564.xlsx",
+    "id_53565.xlsx",
+    "id_53573.xlsx",
+    "id_53574.xlsx",
+    "id_53575.xlsx"
+  ],
+  "n_nodes": 10,
+  "panel_start": "2023-12-01 00:00:00",
+  "panel_end": "2024-06-30 23:00:00",
+  "w_geo": 0.4,
+  "w_dtw": 0.3,
+  "w_corr": 0.3,
+  "downsample_step": 4
+}

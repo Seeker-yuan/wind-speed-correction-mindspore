@@ -9,6 +9,7 @@
   - 兼容预测器(MindSporeWindPredictor): 图神经网络版预测接口
 """
 
+import os
 import numpy as np
 
 # =========================================================================
@@ -19,9 +20,14 @@ try:
     from mindspore import nn, ops, Tensor, context
     from mindspore import dtype as mstype
     from mindspore.nn import MSELoss, Adam
-    context.set_context(mode=context.PYNATIVE_MODE, device_target="CPU")
+
+    ms_mode_env = os.getenv('MS_MODE', 'GRAPH').upper()
+    ms_device_target = os.getenv('MS_DEVICE_TARGET', 'CPU').upper()
+    ms_mode = context.GRAPH_MODE if ms_mode_env == 'GRAPH' else context.PYNATIVE_MODE
+    context.set_context(mode=ms_mode, device_target=ms_device_target)
+
     MINDSPORE_AVAILABLE = True
-    print("[INFO] MindSpore ST-GNN (CPU)")
+    print(f"[INFO] MindSpore ST-GNN ({ms_device_target}, mode={ms_mode_env})")
 except ImportError:
     MINDSPORE_AVAILABLE = False
     print("[INFO] MindSpore unavailable, sklearn fallback")

@@ -6,6 +6,7 @@
 
 import math
 import os
+import json
 import pandas as pd
 import numpy as np
 import time
@@ -147,11 +148,60 @@ def _dtw_similarity(panel_filled, downsample_step=3):
     return sim
 
 
-def build_global_adjacency(machine_names, panel, w_geo=0.4, w_dtw=0.3, w_corr=0.3):
+def _build_adj_cache_meta(machine_names, panel, w_geo, w_dtw, w_corr, downsample_step):
+    return {
+        'machine_names': list(machine_names),
+        'n_nodes': int(len(machine_names)),
+        'panel_start': str(panel.index.min()),
+        'panel_end': str(panel.index.max()),
+        'w_geo': float(w_geo),
+        'w_dtw': float(w_dtw),
+        'w_corr': float(w_corr),
+        'downsample_step': int(downsample_step),
+    }
+
+
+def _load_cached_adjacency(cache_np_path, cache_meta_path, expected_meta):
+    if not (os.path.exists(cache_np_path) and os.path.exists(cache_meta_path)):
+        return None
+    try:
+        with open(cache_meta_path, 'r', encoding='utf-8') as f:
+            saved_meta = json.load(f)
+        if saved_meta != expected_meta:
+            return None
+        adj = np.load(cache_np_path)
+        if adj.shape != (expected_meta['n_nodes'], expected_meta['n_nodes']):
+            return None
+        return adj.astype(np.float32)
+    except Exception:
+        return None
+
+
+def _save_cached_adjacency(cache_np_path, cache_meta_path, meta, adjacency):
+    os.makedirs(os.path.dirname(cache_np_path), exist_ok=True)
+    np.save(cache_np_path, adjacency.astype(np.float32))
+    with open(cache_meta_path, 'w', encoding='utf-8') as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+
+
+def build_global_adjacency(machine_names, panel, w_geo=0.4, w_dtw=0.3, w_corr=0.3,
+                           downsample_step=3, use_cache=True):
     """构建多视图融合邻接矩阵 A_global"""
+    cache_np_path = os.path.join(BASE_DIR, 'cache', 'A_global.npy')
+    cache_meta_path = os.path.join(BASE_DIR, 'cache', 'A_global.meta.json')
+    expected_meta = _build_adj_cache_meta(
+        machine_names, panel, w_geo, w_dtw, w_corr, downsample_step
+    )
+
+    if use_cache:
+        cached = _load_cached_adjacency(cache_np_path, cache_meta_path, expected_meta)
+        if cached is not None:
+            print(f"[OK] 已加载缓存邻接矩阵: {cache_np_path}")
+            return cached
+
     panel_filled = _fill_for_features(panel)
     a_geo = _geo_similarity(machine_names)
-    a_dtw = _dtw_similarity(panel_filled)
+    a_dtw = _dtw_similarity(panel_filled, downsample_step=downsample_step)
     a_corr = _corr_similarity(panel_filled)
 
     a_global = w_geo * a_geo + w_dtw * a_dtw + w_corr * a_corr
@@ -161,6 +211,11 @@ def build_global_adjacency(machine_names, panel, w_geo=0.4, w_dtw=0.3, w_corr=0.
     a_global = a_global + np.eye(a_global.shape[0], dtype=np.float32)
     deg = a_global.sum(axis=1, keepdims=True) + 1e-8
     a_global = a_global / deg
+
+    if use_cache:
+        _save_cached_adjacency(cache_np_path, cache_meta_path, expected_meta, a_global)
+        print(f"[OK] 已保存邻接矩阵缓存: {cache_np_path}")
+
     return a_global.astype(np.float32)
 
 
@@ -230,7 +285,8 @@ def save_global_filled_results(machine_names, panel_raw, panel_filled, out_dir):
 
 
 def run_global_synchronous_pipeline(original_dir, seq_len=6, epochs=10,
-                                    hidden_size=64, w_geo=0.4, w_dtw=0.3, w_corr=0.3):
+                                    hidden_size=64, w_geo=0.4, w_dtw=0.3, w_corr=0.3,
+                                    dtw_downsample_step=3, use_adj_cache=True):
     """两阶段全局方案:
     1) 全局关系图构建 (A_global)
     2) 全局模型训练 + 同步逐时补全
@@ -242,7 +298,9 @@ def run_global_synchronous_pipeline(original_dir, seq_len=6, epochs=10,
     machine_names = sorted(machines.keys())
     panel_raw = build_global_panel(machine_names)
     adjacency = build_global_adjacency(machine_names, panel_raw,
-                                       w_geo=w_geo, w_dtw=w_dtw, w_corr=w_corr)
+                                       w_geo=w_geo, w_dtw=w_dtw, w_corr=w_corr,
+                                       downsample_step=dtw_downsample_step,
+                                       use_cache=use_adj_cache)
 
     print(f"\n{'='*70}")
     print("阶段2/2: 全局同步模型训练与补全")
