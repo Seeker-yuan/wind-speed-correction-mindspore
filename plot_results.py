@@ -73,7 +73,7 @@ def plot_heatmap():
     plt.xlabel("全场风机节点", fontsize=12)
     plt.ylabel("全场风机节点", fontsize=12)
 
-    out_path = os.path.join(OUTPUT_DIR, "1_全局拓扑热力图.png")
+    out_path = os.path.join(OUTPUT_DIR, "图1_全场拓扑关系热力图.png")
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close()
     print(f"[OK] 图1已生成: {out_path}")
@@ -130,7 +130,7 @@ def plot_single_machine_repair():
     plt.grid(True, linestyle=":", alpha=0.6)
     plt.gcf().autofmt_xdate()
 
-    out_path = os.path.join(OUTPUT_DIR, "2_典型单机修复图.png")
+    out_path = os.path.join(OUTPUT_DIR, "图2_典型机组短时修复对比图.png")
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close()
     print(f"[OK] 图2已生成: {out_path}")
@@ -262,7 +262,7 @@ def plot_synchronous_evolution():
 
     plt.gcf().autofmt_xdate()
     plt.tight_layout()
-    out_path = os.path.join(OUTPUT_DIR, "3_全局同步演化切片图.png")
+    out_path = os.path.join(OUTPUT_DIR, "图3_多机组联动推演图_短时并发或同窗参考.png")
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.close()
     print(f"[OK] 图3已生成: {out_path}")
