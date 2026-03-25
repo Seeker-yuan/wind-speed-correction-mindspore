@@ -1,5 +1,6 @@
 import argparse
 import importlib.util
+import sys
 import time
 import tracemalloc
 from dataclasses import dataclass
@@ -20,6 +21,12 @@ def _load_core_module():
             break
     if src is None:
         raise FileNotFoundError("未找到核心脚本：预测_mindspore.py 或 汇总预测.py")
+
+    # Ensure local imports (e.g., mindspore_gnn_model.py) resolve reliably
+    # when this module is loaded by absolute path.
+    base_str = str(base)
+    if base_str not in sys.path:
+        sys.path.insert(0, base_str)
 
     spec = importlib.util.spec_from_file_location("core_pipeline", str(src))
     if spec is None or spec.loader is None:
