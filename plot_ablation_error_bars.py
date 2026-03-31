@@ -10,9 +10,6 @@ SEED47_PATH = BASE / "ablation_seed47.txt"
 OUT_DIR = BASE / "汇报图表"
 OUT_DIR.mkdir(exist_ok=True)
 OUT_PNG = OUT_DIR / "图9_消融实验误差棒对比图.png"
-OUT_SVG = OUT_DIR / "图9_消融实验误差棒对比图.svg"
-OUT_PNG_AUDIT = OUT_DIR / "图9_消融实验误差棒对比图_审查版_600dpi.png"
-OUT_SVG_AUDIT = OUT_DIR / "图9_消融实验误差棒对比图_审查版.svg"
 
 METHOD_ORDER = [
     "本发明完整方法",
@@ -194,13 +191,7 @@ def main():
     )
     fig.tight_layout()
     fig.savefig(OUT_PNG, dpi=300, bbox_inches="tight")
-    fig.savefig(OUT_SVG, bbox_inches="tight")
-    fig.savefig(OUT_PNG_AUDIT, dpi=600, facecolor="white", bbox_inches="tight")
-    fig.savefig(OUT_SVG_AUDIT, facecolor="white", bbox_inches="tight")
     print(f"[OK] saved: {OUT_PNG}")
-    print(f"[OK] saved: {OUT_SVG}")
-    print(f"[OK] saved: {OUT_PNG_AUDIT}")
-    print(f"[OK] saved: {OUT_SVG_AUDIT}")
 
 
 if __name__ == "__main__":

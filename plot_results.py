@@ -13,6 +13,17 @@ CLEANED_DIR = os.path.join(BASE_DIR, "cleaned_data")
 CACHE_DIR = os.path.join(BASE_DIR, "cache")
 OUTPUT_DIR = os.path.join(BASE_DIR, "汇报图表")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+OUT2_A4 = os.path.join(OUTPUT_DIR, "图2_典型机组短时修复对比图_A4论文版.png")
+OUT2_A4_PDF = os.path.join(OUTPUT_DIR, "图2_典型机组短时修复对比图_A4论文版.pdf")
+OUT3_A4 = os.path.join(OUTPUT_DIR, "图3_多机组联动推演图_A4论文版.png")
+OUT3_A4_PDF = os.path.join(OUTPUT_DIR, "图3_多机组联动推演图_A4论文版.pdf")
+
+A4_LANDSCAPE = (11.69, 8.27)
+FS_BIG_TITLE = 32
+FS_SUB_TITLE = 28
+FS_AXIS = 22
+FS_TICK = 18
+FS_LEGEND = 18
 
 
 def _list_cleaned_files():
@@ -115,26 +126,35 @@ def plot_single_machine_repair():
     fname, df, l, r = best
     sub_df = df.iloc[l:r]
 
-    plt.figure(figsize=(12, 5))
-    plt.plot(sub_df.index, sub_df["OBS"], label="ST-GNN 预测修复值", color="#d62728", linewidth=2)
-    plt.plot(sub_df.index, sub_df["OBS_raw"], label="原始观测值", color="#1f77b4", alpha=0.6, linestyle="--")
+    fig, ax = plt.subplots(1, 1, figsize=A4_LANDSCAPE, dpi=420)
+    ax.plot(sub_df.index, sub_df["OBS"], label="ST-GNN 预测修复值", color="#d62728", linewidth=3.4)
+    ax.plot(sub_df.index, sub_df["OBS_raw"], label="原始观测值", color="#1f77b4", alpha=0.72, linestyle="--", linewidth=3.0)
 
     fill_times = sub_df[sub_df["filled"] == 1].index
     for t in fill_times:
-        plt.axvspan(t - pd.Timedelta(minutes=30), t + pd.Timedelta(minutes=30),
-                    color="#2ca02c", alpha=0.2, lw=0)
+        ax.axvspan(
+            t - pd.Timedelta(minutes=30),
+            t + pd.Timedelta(minutes=30),
+            color="#2ca02c",
+            alpha=0.2,
+            lw=0,
+        )
 
-    plt.title(f"图2 典型机组短期风速修复时序图 (节点ID: {fname.split('.')[0]})", fontsize=16)
-    plt.ylabel("风速 (m/s)")
-    plt.legend()
-    plt.grid(True, linestyle=":", alpha=0.6)
-    plt.gcf().autofmt_xdate()
+    ax.set_title(f"图2 典型机组短期风速修复时序图 (节点ID: {fname.split('.')[0]})", fontsize=FS_BIG_TITLE, pad=14)
+    ax.set_ylabel("风速 (m/s)", fontsize=FS_AXIS)
+    ax.set_xlabel("时间", fontsize=FS_AXIS)
+    ax.legend(fontsize=FS_LEGEND, loc="upper right")
+    ax.tick_params(axis="both", labelsize=FS_TICK)
+    ax.grid(True, linestyle=":", alpha=0.6)
+    fig.autofmt_xdate(rotation=25)
 
-    out_path = os.path.join(OUTPUT_DIR, "图2_典型机组短时修复对比图.png")
-    plt.savefig(out_path, dpi=300, bbox_inches="tight")
-    plt.close()
-    print(f"[OK] 图2已生成: {out_path}")
-    return out_path
+    fig.tight_layout(pad=1.2)
+    fig.savefig(OUT2_A4, dpi=420, bbox_inches="tight")
+    fig.savefig(OUT2_A4_PDF, bbox_inches="tight")
+    plt.close(fig)
+    print(f"[OK] 图2已生成: {OUT2_A4}")
+    print(f"[OK] 图2已生成: {OUT2_A4_PDF}")
+    return OUT2_A4
 
 
 def plot_synchronous_evolution():
@@ -240,33 +260,40 @@ def plot_synchronous_evolution():
         fallback_used = True
 
     (n1, d1), (n2, d2), (n3, d3), start_idx, end_idx = best
-    fig, axes = plt.subplots(3, 1, figsize=(12, 8), sharex=True)
+    fig, axes = plt.subplots(3, 1, figsize=A4_LANDSCAPE, dpi=420, sharex=True)
     for ax, (name, df) in zip(axes, [(n1, d1), (n2, d2), (n3, d3)]):
         sub_df = df.iloc[start_idx:end_idx]
-        ax.plot(sub_df.index, sub_df["OBS"], color="#d62728", label="ST-GNN 同步推演")
-        ax.plot(sub_df.index, sub_df["OBS_raw"], color="#1f77b4", alpha=0.5, linestyle="--", label="原观测数据")
+        ax.plot(sub_df.index, sub_df["OBS"], color="#d62728", linewidth=3.0, label="ST-GNN 同步推演")
+        ax.plot(sub_df.index, sub_df["OBS_raw"], color="#1f77b4", alpha=0.58, linestyle="--", linewidth=2.8, label="原观测数据")
 
         sync_times = sub_df[sub_df["filled"] == 1].index
         for t in sync_times:
             ax.axvspan(t - pd.Timedelta(minutes=30), t + pd.Timedelta(minutes=30),
                        color="gray", alpha=0.3, lw=0)
 
-        ax.set_ylabel(f"节点 {name.split('.')[0]}", fontsize=10)
+        node_label = name.split('.')[0]
+        # 文件名常见为 id_XXXXX.xlsx，这里避免出现 "id_id_XXXXX" 重复前缀
+        if node_label.startswith("id_"):
+            node_label = node_label[3:]
+        ax.set_ylabel(f"节点 id_{node_label}", fontsize=FS_AXIS - 1, labelpad=12)
         if ax is axes[0]:
             title = "图3 风场多节点并发缺失时的同步推演过程"
             if fallback_used:
                 title = "图3 风场多节点缺失联动推演过程（短时并发/同窗参考）"
-            ax.set_title(title, fontsize=15)
-            ax.legend(loc="upper right")
+            ax.set_title(title, fontsize=FS_SUB_TITLE, pad=10)
+            ax.legend(loc="upper right", fontsize=FS_LEGEND)
+        ax.tick_params(axis="x", labelsize=FS_TICK)
+        ax.tick_params(axis="y", labelsize=FS_TICK - 1)
         ax.grid(True, linestyle=":", alpha=0.6)
 
-    plt.gcf().autofmt_xdate()
-    plt.tight_layout()
-    out_path = os.path.join(OUTPUT_DIR, "图3_多机组联动推演图_短时并发或同窗参考.png")
-    plt.savefig(out_path, dpi=300, bbox_inches="tight")
-    plt.close()
-    print(f"[OK] 图3已生成: {out_path}")
-    return out_path
+    fig.autofmt_xdate(rotation=25)
+    fig.subplots_adjust(left=0.11, right=0.995, top=0.92, bottom=0.10, hspace=0.18)
+    fig.savefig(OUT3_A4, dpi=420, bbox_inches="tight")
+    fig.savefig(OUT3_A4_PDF, bbox_inches="tight")
+    plt.close(fig)
+    print(f"[OK] 图3已生成: {OUT3_A4}")
+    print(f"[OK] 图3已生成: {OUT3_A4_PDF}")
+    return OUT3_A4
 
 
 def main():
